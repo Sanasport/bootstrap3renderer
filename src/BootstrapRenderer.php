@@ -25,8 +25,6 @@ use Nette\Forms\Controls\SubmitButton;
 use Nette\Forms\Controls\TextBase;
 use Nette\Forms\Form;
 use Nette\Forms\IControl;
-use Nette\Forms\Rendering\DefaultFormRenderer;
-use Nette\InvalidArgumentException;
 use Nette\InvalidStateException;
 use Nette\NotSupportedException;
 use Nette\SmartObject;
@@ -89,7 +87,7 @@ class BootstrapRenderer implements IExtendedFormRenderer
      * @param null|string $renderMode RenderModeEnum
      * @param PrototypeContainer $prototypes
      */
-    public function __construct($renderMode = RenderModeEnum::VERTICAL, PrototypeContainer $prototypes = NULL)
+    public function __construct($renderMode = RenderModeEnum::HORIZONTAL, PrototypeContainer $prototypes = NULL)
     {
         $this->renderMode = $renderMode;
         $this->prototypes = $prototypes ?: PrototypeContainer::createDefault();
@@ -190,13 +188,6 @@ class BootstrapRenderer implements IExtendedFormRenderer
     /** {@inheritdoc} */
     public function render(Form $form)
     {
-        if (func_num_args() > 1) {
-            throw new InvalidArgumentException(sprintf(
-                '%s does not suppot $mode argument like %s::render() does. Use ::render{Begin|GlobalErrors|Body|End} instead.',
-                self::class,
-                DefaultFormRenderer::class
-            ));
-        }
         $s = $this->renderBegin($form);
         $s .= $this->renderGlobalErrors();
         $s .= $this->renderBody();
@@ -240,12 +231,9 @@ class BootstrapRenderer implements IExtendedFormRenderer
 
     public function renderBegin(Form $form, array $attrs = [], $withTags = TRUE)
     {
-        if ($this->form !== NULL) {
-            throw new InvalidStateException(
-                'Cannot render nested form. If you finished rendering of previous form without calling ::renderEnd()'
-                . ' and this is intended, use ::reset() method before rendering a new form.');
+        if ($this->form !== $form) {
+            $this->form = $form;
         }
-        $this->form = $form;
 
         $this->renderedControls = new SplObjectStorage;
         $this->addFormModeClass($form, $attrs);
@@ -422,26 +410,27 @@ class BootstrapRenderer implements IExtendedFormRenderer
             return Html::el();
         }
         if ($this->renderMode === RenderModeEnum::HORIZONTAL) {
-            $rowContainer = clone $this->prototypes->horizontalButtons;
+            $retContainer = clone $this->prototypes->horizontalButtons;
             // set inner grid element to "col-ss-<inputcolumns> col-ss-offset-<labelcolumns>
-            $buttonColsContainer = $rowContainer->getPlaceholder('cols');
-            $buttonColsContainer
+            $container = $retContainer->getPlaceholder('cols');
+            $container
                 ->appendAttribute('class', $this->getColumnsClass($this->inputColumns))
                 ->appendAttribute('class', $this->getOffsetClass($this->labelColumns));
         } else {
-            $rowContainer = $buttonColsContainer = PlaceholderHtml::el();
+            $retContainer = $container = PlaceholderHtml::el();
         }
         $first = TRUE;
         foreach ($buttons as $button) {
-            if ($first) {
-                $first = FALSE;
-            } else {
-                $this->addSpace($buttonColsContainer);
+            if ($this->shouldRender($button)) {
+                if ($first) {
+                    $first = FALSE;
+                } else {
+                    $this->addSpace($container);
+                }
+                $container->addHtml($this->renderButton($button));
             }
-            $buttonColsContainer->addHtml($this->renderButton($button));
-
         }
-        return $rowContainer;
+        return $retContainer;
     }
 
     /**
@@ -542,7 +531,7 @@ class BootstrapRenderer implements IExtendedFormRenderer
         $el->appendAttribute('class', 'btn');
         $el->addAttributes($attrs);
         if (!$this->hasButtonTypeClass($el)) {
-            if ($button instanceof SubmitButton) {
+            if ($button instanceof SubmitButton && $this->renderMode !== RenderModeEnum::INLINE) {
                 $el->appendAttribute('class', 'btn-primary');
             } else {
                 $el->appendAttribute('class', 'btn-default');
@@ -597,15 +586,6 @@ class BootstrapRenderer implements IExtendedFormRenderer
     {
         $id = SecureCallHelper::tryCall($control, 'getHtmlId') ?: ('-anonymous-' . (self::$uniqueDescriptionId++));
         return 'describe-' . $id;
-    }
-
-    /**
-     * Remove reference to form from the renderer.
-     * Use this if you want to call another renderBegin() without properly ending previous form with renderEnd().
-     */
-    public function reset()
-    {
-        $this->form = NULL;
     }
 
     /**
